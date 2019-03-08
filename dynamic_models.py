@@ -4,7 +4,6 @@ from multiprocessing import Pool
 from physbam_python.rollout_physbam_2d import rollout_single as rollout_single_2d
 from physbam_python.rollout_physbam_3d import rollout_single as rollout_single_3d
 
-
 def _pickle_method(method):
 	func_name = method.im_func.__name__
 	obj = method.im_self

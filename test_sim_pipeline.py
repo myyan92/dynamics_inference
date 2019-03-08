@@ -7,12 +7,12 @@ and conversion back to robot frame is correct.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from physbam_python_new import rollout_physbam
-from sim_integration.fitting_inference import FittingInference
+from dynamic_models import *
+from visual_inference.fitting_inference import FittingInference
 import os, pdb
 from PIL import Image
 
-test_data_dir = "/scr1/mengyuan/data/real_rope_ours_2/seq_m2_2/"
+test_data_dir = "./test_data/"
 
 actions = np.load(os.path.join(test_data_dir, 'actions.npy'))
 actions = actions[:,[12,13,16,17]] # starting position and move delta
@@ -25,6 +25,9 @@ for i in range(num_images):
 
 inferencer = FittingInference()
 inferencer.set_guess(images[0])
+#dynamics = physbam_2d()
+#dynamics = physbam_3d(physbam_args=" -friction 0.176 -stiffen_linear 2.223 -stiffen_bending 0.218")
+dynamics = neural_sim('LSTM', '/scr-ssd/mengyuan/neural_simulator/LSTM_seq3d_best_augmented/model-best')
 
 for before, after, action in zip(images[0:-1], images[1:], actions):
     state = inferencer.inference(before)
@@ -35,11 +38,10 @@ for before, after, action in zip(images[0:-1], images[1:], actions):
         print("action not in contact. Skip simulation")
         next_state = state
     else:
-        trans_action = np.array([[action[2], action[3], float(action_node)/state.shape[0]]])
+        trans_action = (action_node, [action[2], action[3]])
         print(state)
         print(trans_action)
-        next_state = rollout_physbam.rollout_single(state, trans_action,
-                physbam_args=" -friction 0.176 -stiffen_linear 2.223 -stiffen_bending 0.218")
+        next_state = dynamics.execute(state, [trans_action])
     # To image frame and visualize
     next_state_im = next_state.copy()
     next_state_im[:,1] *= -1.0
