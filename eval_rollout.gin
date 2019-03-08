@@ -1,0 +1,18 @@
+HybridInference.model = @Model_STNv2()
+HybridInference.pred_target = 'node'
+HybridInference.snapshot = '/scr-ssd/mengyuan/TF_cloth2d/simseq_data_pred_node_STN_2_large_augmented/model-38'
+#HybridInference.snapshot = '/scr-ssd/mengyuan/TF_cloth2d/STN_imageloss/train_real_ours_pretrain_simseq_STNv2_augmented/model-47'
+HybridInference.memory = False
+
+Model_STNv2.vgg16_npy_path = '/scr-ssd/mengyuan/TF_cloth2d/models/vgg16_weights.npz'
+Model_STNv2.fc_sizes = [1024, 1024, 256]
+Model_STNv2.loss_type = 'image_loss_EM'
+Model_STNv2.learning_rate = 0.0
+Model_STNv2.momentum = 0.7
+Model_STNv2.save_dir = './tmp'
+
+neural_sim.model_type = 'LSTM'
+neural_sim.snapshot = 'LSTM_seq3d_best_augmented/model-best'
+
+physbam_2d.physbam_args = ' -disable_collisions -stiffen_linear 89.158 -stiffen_bending 284.332'
+physbam_3d.physbam_args = ' -friction 0.176 -stiffen_linear 2.223 -stiffen_bending 0.218'
