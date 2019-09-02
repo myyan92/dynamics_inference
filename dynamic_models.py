@@ -7,7 +7,7 @@ from physbam_python.rollout_physbam_3d import rollout_single as rollout_single_3
 
 is_gpu_instance = os.environ.get('IS_GPU_INSTANCE') != None
 if is_gpu_instance:
-    from redis_client import RedisQueue, RedisHash
+    from dynamics_inference.redis_client import RedisQueue, RedisHash
     from physbam_python.rollout_physbam_3d import id_generator as id_generator
     import json
 
@@ -75,8 +75,10 @@ class physbam_3d(object):
   def __init__(self, physbam_args=" -friction 0.176 -stiffen_linear 2.223 -stiffen_bending 0.218"):
     self.physbam_args = physbam_args
     if is_gpu_instance:
-        self.task_queue = RedisQueue() # how to set hostname?
+        self.task_queue = RedisQueue()
+        self.task_queue.clear()
         self.result_hash = RedisHash()
+        self.result_hash.clear()
 
   def execute(self, state, actions, return_3d=False, return_traj=False):
     """Execute action sequence and get end state.
@@ -93,12 +95,13 @@ class physbam_3d(object):
         state = rollout_single_3d(state, actions, physbam_args=' -dt 1e-3 ' + self.physbam_args, return_3d=return_3d, return_traj=return_traj)
     else:
         job_id = id_generator()
-        job_str = json.dumps({'state':state,'action':action, 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
+        job_str = json.dumps({'state':state.tolist(),'action':action.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
                               'return_3d':return_3d, 'return_traj':return_traj, 'job_id':job_id})
-        self.task_queue.push(job_str)
-        return_str = self.return_hash.get(job_id, blocking=True)
-        return_obj = json.loads(return_str)
-        state = return_obj['state']
+        self.task_queue.put(job_str)
+        return_str = self.result_hash.get(job_id, block=True)
+        return_str = return_str.decode('utf-8')
+        return_dict = json.loads(return_str)
+        state = np.array(return_dict['state'])
     return state
 
   def execute_batch(self, state, actions, return_3d=False):
@@ -125,13 +128,14 @@ class physbam_3d(object):
             nodes = np.array([[float(a[0])/(st.shape[0]-1)] for a in ac])
             ac = np.concatenate([moves, nodes],axis=1)
             job_id = id_generator()
-            job_str = json.dumps({'state':st,'action':ac, 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
+            job_str = json.dumps({'state':st.tolist(),'action':ac.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
                                   'return_3d':rt, 'return_traj':False, 'job_id':job_id})
-            self.task_queue.push(job_str)
+            self.task_queue.put(job_str)
             job_ids.append(job_id)
-        return_strings = self.return_hash.get_batch(job_ids, blocking=True)
-        return_objects = [json.loads(rs) for rs in return_strings]
-        states = [ro['state'] for ro in return_objects]
+        return_strings = self.result_hash.get_batch(job_ids, block=True)
+        return_strings = [rs.decode('utf-8') for rs in return_strings]
+        return_dicts = [json.loads(rs) for rs in return_strings]
+        states = [np.array(rd['state']) for rd in return_dicts]
     return states
 
 
