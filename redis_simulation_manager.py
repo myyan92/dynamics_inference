@@ -17,7 +17,11 @@ def process_func(task_queue, result_hash, terminate):
                 task_dict['state']=np.array(task_dict['state'])
                 task_dict['action']=np.array(task_dict['action'])
                 state = rollout_single_3d(**task_dict)
-                return_str = json.dumps({'state':state.tolist()})
+                if state is None:
+                    print('job id ', job_id, ' failed')
+                    return_str = json.dumps({'state':None})
+                else:
+                    return_str = json.dumps({'state':state.tolist()})
                 result_hash.put(job_id, return_str)
     except KeyboardInterrupt:
         print('receive ctrl-c')
