@@ -137,7 +137,7 @@ class physbam_3d(object):
         return_strings = self.result_hash.get_batch(job_ids, block=True)
         return_strings = [rs.decode('utf-8') for rs in return_strings]
         return_dicts = [json.loads(rs) for rs in return_strings]
-        states = [np.array(rd['state']) for rd in return_dicts if rd is not None else None]
+        states = [np.array(rd['state']) if rd is not None else None for rd in return_dicts]
     return states
 
 
