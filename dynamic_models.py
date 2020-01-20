@@ -1,4 +1,5 @@
 import numpy as np
+import os, shutil
 import gin
 import os
 from multiprocessing import Pool
@@ -40,7 +41,7 @@ class physbam_2d(object):
   def __init__(self, physbam_args=" -disable_collisions -stiffen_bending 100"):
     self.physbam_args = physbam_args
 
-  def execute(self, state, actions):
+  def execute(self, state, actions, **kwargs):
     """Execute action sequence and get end state.
     Args:
       state: (N,2) array representing the current state.
@@ -52,7 +53,7 @@ class physbam_2d(object):
                                physbam_args=self.physbam_args)
     return state
 
-  def execute_batch(self, state, actions):
+  def execute_batch(self, state, actions, **kwargs):
     """Execute in batch.
     Args:
       state: (N,2) array or a list of (N,2) array representing the current state.
@@ -80,7 +81,12 @@ class physbam_3d(object):
         self.result_hash = RedisHash()
         self.result_hash.clear()
 
-  def execute(self, state, actions, return_3d=False, return_traj=False):
+    else:
+        if os.path.isdir('./physbam_3d_springs_tmp'):
+            shutil.rmtree('./physbam_3d_springs_tmp')
+        os.mkdir('./physbam_3d_springs_tmp')
+
+  def execute(self, state, actions, return_traj=False, reset_spring=True, idx=0):
     """Execute action sequence and get end state.
     Args:
       current: (N,2) array representing the current state.
@@ -89,14 +95,25 @@ class physbam_3d(object):
     """
     # transform actions
     moves = np.array([ac[1] for ac in actions])
-    nodes = np.array([[float(ac[0])/(state.shape[0]-1)] for ac in actions])
+    nodes = np.array([[float(ac[0])/(state.shape[0]//2-1)] for ac in actions])
     actions = np.concatenate([moves, nodes],axis=1)
+    assert(state.shape==(128,3)) # must be raw state
     if not is_gpu_instance:
-        state = rollout_single_3d(state, actions, physbam_args=' -dt 1e-3 ' + self.physbam_args, return_3d=return_3d, return_traj=return_traj)
+        if not reset_spring:
+            if (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)))) or \
+               (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)))):
+                raise ValueError('no spring files saved')
+        state = rollout_single_3d(state, actions, physbam_args=' -dt 1e-3 ' + self.physbam_args,
+                              return_traj=return_traj, input_raw=True, return_raw=True,
+                              save_linear_spring=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if reset_spring else None,
+                              save_bending_spring=os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)) if reset_spring else None,
+                              load_linear_spring=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if not reset_spring else None,
+                              load_bending_spring=os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)) if not reset_spring else None
+                              )
     else:
         job_id = id_generator()
         job_str = json.dumps({'state':state.tolist(),'action':action.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
-                              'return_3d':return_3d, 'return_traj':return_traj, 'job_id':job_id})
+                              'return_traj':return_traj, 'reset_spring':reset_spring, 'idx':idx, 'job_id':job_id})
         self.task_queue.put(job_str)
         return_str = self.result_hash.get(job_id, block=True)
         return_str = return_str.decode('utf-8')
@@ -106,7 +123,7 @@ class physbam_3d(object):
         state = np.array(return_dict['state'])
     return state
 
-  def execute_batch(self, state, actions, return_3d=False):
+  def execute_batch(self, state, actions, return_traj=False, reset_spring=True):
     """Execute in batch.
     Args:
       state: (N,2) array or a list of (N,2) array representing the current state.
@@ -117,21 +134,23 @@ class physbam_3d(object):
     else:
         assert(state.ndim==2)
         state = [state for a in actions]
-    return_3d = [return_3d for a in actions]
+    return_traj = [return_traj for a in actions]
+    reset_spring = [reset_spring for a in actions]
+    idx = [i for i,a in enumerate(actions)]
     if not is_gpu_instance:
         pool = Pool()
-        states = pool.starmap(self.execute, zip(state, actions, return_3d))
+        states = pool.starmap(self.execute, zip(state, actions, return_traj, reset_spring, idx))
         pool.close()
         pool.join()
     else:
         job_ids = []
-        for st,ac,rt in zip(state, actions, return_3d):
+        for st,ac,rt,rs,i in zip(state, actions, return_traj, reset_spring, idx):
             moves = np.array([a[1] for a in ac])
-            nodes = np.array([[float(a[0])/(st.shape[0]-1)] for a in ac])
+            nodes = np.array([[float(a[0])/(st.shape[0]//2-1)] for a in ac])
             ac = np.concatenate([moves, nodes],axis=1)
             job_id = id_generator()
             job_str = json.dumps({'state':st.tolist(),'action':ac.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
-                                  'return_3d':rt, 'return_traj':False, 'job_id':job_id})
+                                  'return_traj':rt, 'reset_spring':rs, 'idx':i, 'job_id':job_id})
             self.task_queue.put(job_str)
             job_ids.append(job_id)
         return_strings = self.result_hash.get_batch(job_ids, block=True)
@@ -139,6 +158,9 @@ class physbam_3d(object):
         return_dicts = [json.loads(rs) for rs in return_strings]
         states = [np.array(rd['state']) if rd['state'] is not None else None for rd in return_dicts]
     return states
+
+  def close(self):
+    shutil.rmtree('./physbam_3d_springs_tmp')
 
 
 #import tensorflow as tf
