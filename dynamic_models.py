@@ -204,7 +204,6 @@ class physbam_3d(object):
 #        assert(state.ndim==2)
 #        state = [state for a in actions]
 #    state = np.array(state)
-
 #    state = state*np.array([-1.0, 1.0])+np.array([0.5, 0.0])
 #    actions = [[(a[0], np.array([-a[1][0], a[1][1]])) for a in action] for action in actions]
 
