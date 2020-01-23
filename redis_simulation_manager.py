@@ -2,7 +2,7 @@ from redis_client import RedisQueue, RedisHash
 import json
 from physbam_python.rollout_physbam_3d import rollout_single as rollout_single_3d
 import numpy as np
-import signal, sys
+import signal, sys, os, shutil
 from multiprocessing import Process, Value, cpu_count
 from ctypes import c_bool
 
@@ -34,6 +34,7 @@ def process_func(task_queue, result_hash, terminate):
                     print('job id ', job_id, ' failed')
                     return_str = json.dumps({'state':None})
                 else:
+                    print('job id ', job_id, ' finished')
                     return_str = json.dumps({'state':state.tolist()})
                 result_hash.put(job_id, return_str)
     except KeyboardInterrupt:

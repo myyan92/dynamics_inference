@@ -112,7 +112,7 @@ class physbam_3d(object):
                               )
     else:
         job_id = id_generator()
-        job_str = json.dumps({'state':state.tolist(),'action':action.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
+        job_str = json.dumps({'state':state.tolist(),'action':actions.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
                               'return_traj':return_traj, 'reset_spring':reset_spring, 'idx':idx, 'job_id':job_id})
         self.task_queue.put(job_str)
         return_str = self.result_hash.get(job_id, block=True)
