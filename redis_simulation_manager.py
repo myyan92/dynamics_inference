@@ -24,9 +24,9 @@ def process_func(task_queue, result_hash, terminate):
                     if (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)))) or \
                        (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)))):
                         raise ValueError('no spring files saved')
-                task_dict['save_linear_spring']=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if reset_spring else None,
-                task_dict['save_bending_spring']=os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)) if reset_spring else None,
-                task_dict['load_linear_spring']=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if not reset_spring else None,
+                task_dict['save_linear_spring']=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if reset_spring else None
+                task_dict['save_bending_spring']=os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)) if reset_spring else None
+                task_dict['load_linear_spring']=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if not reset_spring else None
                 task_dict['load_bending_spring']=os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)) if not reset_spring else None
 
                 state = rollout_single_3d(**task_dict)
