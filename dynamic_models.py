@@ -1,9 +1,15 @@
 import numpy as np
 import os, shutil
 import gin
+import json
+import os, glob
+import time
 from multiprocessing import Pool
 from physbam_python.rollout_physbam_2d import rollout_single as rollout_single_2d
 from physbam_python.rollout_physbam_3d import rollout_single as rollout_single_3d
+
+GROUP_SCRATCH = os.environ.get('GROUP_SCRATCH')
+SLURM_JOB_ID_MASTER = os.environ.get('SLURM_JOB_ID_PACK_GROUP_0', '')
 
 def _pickle_method(method):
 	func_name = method.im_func.__name__
@@ -57,7 +63,7 @@ class physbam_2d(object):
     else:
         assert(state.ndim==2)
         state = [state for a in actions]
-    pool = Pool(8)
+    pool = Pool()
     states = pool.starmap(self.execute, zip(state, actions))
     pool.close()
     pool.join()
@@ -68,9 +74,16 @@ class physbam_2d(object):
 class physbam_3d(object):
   def __init__(self, physbam_args=" -friction 0.176 -stiffen_linear 2.223 -stiffen_bending 0.218"):
     self.physbam_args = physbam_args
-    if os.path.isdir('./physbam_3d_springs_tmp'):
-        shutil.rmtree('./physbam_3d_springs_tmp')
-    os.mkdir('./physbam_3d_springs_tmp')
+    if os.path.isdir(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'physbam_3d_springs_tmp')):
+        shutil.rmtree(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'physbam_3d_springs_tmp'))
+    os.mkdir(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'physbam_3d_springs_tmp'))
+
+    files = glob.glob(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'task_*.json'))
+    for f in files:
+        os.remove(f)
+    files = glob.glob(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'result_*.npy'))
+    for f in files:
+        os.remove(f)
 
   def execute(self, state, actions, return_traj=False, reset_spring=True, idx=0):
     """Execute action sequence and get end state.
@@ -88,13 +101,23 @@ class physbam_3d(object):
         if (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)))) or \
            (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)))):
             raise ValueError('no spring files saved')
-    state = rollout_single_3d(state, actions, physbam_args=' -dt 1e-3 ' + self.physbam_args,
-                              return_traj=return_traj, input_raw=True, return_raw=True,
-                              save_linear_spring=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if reset_spring else None,
-                              save_bending_spring=os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)) if reset_spring else None,
-                              load_linear_spring=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if not reset_spring else None,
-                              load_bending_spring=os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)) if not reset_spring else None
-                              )
+    with open(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'task_%03d_tmp.json'%(id)), 'w') as f:
+        json.dump({'state':state.tolist(),'action':actions.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
+                   'return_traj':return_traj, 'input_raw':True, 'return_raw':True, 'reset_spring':reset_spring, 'idx':idx}, f)
+    os.rename( os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'task_%03d_tmp.json'%(id)),
+               os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'task_%03d.json'%(id)) )
+    print("job %d posted"%(id), time.time())
+    loaded_result = False
+    while not loaded_result:
+        try:
+            state = np.load( os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'result_%03d.npy'%(id)))
+            loaded_result=True
+            os.remove( os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'result_%03d.npy'%(id)))
+        except:
+            time.sleep(0.1)
+    print("job %d received"%(id), time.time())
+    if state.shape == (): # np.array(None)
+        return None
     return state
 
   def execute_batch(self, state, actions, return_traj=False, reset_spring=True):
@@ -108,95 +131,39 @@ class physbam_3d(object):
     else:
         assert(state.ndim==2)
         state = [state for a in actions]
-    return_traj = [return_traj for a in actions]
-    reset_spring = [reset_spring for a in actions]
-    idx = [i for i,a in enumerate(actions)]
-    pool = Pool(8)
-    states = pool.starmap(self.execute, zip(state, actions, return_traj, reset_spring, idx))
-    pool.close()
-    pool.join()
+
+    for id, (st, ac) in enumerate(zip(state, actions)):
+        moves = np.array([a[1] for a in ac])
+        nodes = np.array([[float(a[0])/(st.shape[0]//2-1)] for a in ac])
+        actions = np.concatenate([moves, nodes],axis=1)
+        assert(st.shape==(128,3)) # must be raw state
+        with open(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'task_%03d_tmp.json'%(id)), 'w') as f:
+            json.dump({'state':st.tolist(),'action':actions.tolist(), 'physbam_args':' -dt 1e-3 ' + self.physbam_args,
+                       'return_traj':return_traj, 'input_raw':True, 'return_raw':True, 'reset_spring':reset_spring, 'idx':id}, f)
+        os.rename( os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'task_%03d_tmp.json'%(id)),
+                   os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'task_%03d.json'%(id)) )
+        #print("job %d posted"%(id), time.time())
+
+    states = [None]*len(state)
+    loaded_result = [False]*len(state)
+    while not np.all(loaded_result):
+        for id in range(len(states)):
+            debug_path = os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'result_%03d.npy'%(id))
+            if os.path.exists(os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'result_%03d.npy'%(id))):
+                loaded_result[id] = True
+        time.sleep(2)
+    time.sleep(2)
+    for id in range(len(states)):
+        states[id] = np.load( os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'result_%03d.npy'%(id)), allow_pickle=True)
+        os.remove( os.path.join(GROUP_SCRATCH, 'mengyuan/rope_manipulation', SLURM_JOB_ID_MASTER+'result_%03d.npy'%(id)))
+
+    for id,st in enumerate(states):
+        if st.shape == (): # np.array(None)
+            states[id] = None
     return states
 
   def close(self):
     shutil.rmtree('./physbam_3d_springs_tmp')
-
-
-import tensorflow as tf
-from neural_simulator.model_wrapper import Model
-
-
-@gin.configurable
-class neural_sim(object):
-  def __init__(self, model_type, snapshot):
-    self.start = tf.placeholder(tf.float32, shape=[None, 64, 3])
-    self.action = tf.placeholder(tf.float32, shape=[None, 64, 5])
-
-    tf_config = tf.ConfigProto()
-    tf_config.gpu_options.allow_growth=True
-    self.sess = tf.Session(config=tf_config)
-    self.model = Model(model_type)
-    self.model.build(input=self.start, action=self.action)
-    self.sess.run(tf.global_variables_initializer())
-    self.model.load(self.sess, snapshot)
-    print("Warning: This model is hacked to work with state and action in robot coordinate.")
-    print("It will convert input state and action to fit the distribution of training data")
-
-  def execute(self, state, actions, **kwargs):
-#    state = state*np.array([-1.0, 1.0])+np.array([0.5, 0.0])
-#    actions = [(a[0], np.array([-a[1][0], a[1][1]])) for a in actions]
-
-    onehot_actions = []
-    for ac in actions:
-      onehot_action = np.zeros((state.shape[0], ac[1].shape[0]))
-      onehot_action[ac[0],:] = ac[1]
-      onehot_actions.append(onehot_action)
-    for ac in onehot_actions:
-      state = self.model.predict_single(self.sess, state, ac)
- #   state[:,0]=0.5-state[:,0]
-    return state
-
-  def execute_batch(self, state, actions, **kwargs):
-    if isinstance(state, list) or state.ndim==3:
-        assert(len(state)==len(actions))
-    else:
-        assert(state.ndim==2)
-        state = [state for a in actions]
-    state = np.array(state)
-
-#    state = state*np.array([-1.0, 1.0])+np.array([0.5, 0.0])
-#    actions = [[(a[0], np.array([-a[1][0], a[1][1]])) for a in action] for action in actions]
-
-    num_steps = [len(action) for action in actions]
-    max_num_steps = np.amax(num_steps)
-
-    final_state = np.zeros_like(state)
-    for t in range(max_num_steps):
-      onehot_ac = np.zeros((state.shape[0], state.shape[1], actions[0][0][1].shape[0]+2))
-      for i,action in enumerate(actions):
-        if t<num_steps[i]:
-          onehot_ac[i,action[t][0],:-2] = action[t][1]
-          # compute action angle feature.
-          start_ori = state[i, min(action[t][0]+1,state.shape[1]-1)] - state[i, max(action[t][0]-1,0)]
-          start_theta = np.arctan2(start_ori[1], start_ori[0])
-          if np.linalg.norm(action[t][1][:2]) > 3e-3:
-            target_theta = np.arctan2(action[t][1][1],action[t][1][0])
-            if action[t][0] <= 4:
-              target_theta += np.pi/2.0
-            elif action[t][0] > 59:
-              target_theta -= np.pi/2.0
-            elif np.dot(action[t][1][:2], start_ori[:2]) < 0.0:
-              target_theta += np.pi
-          else:
-            target_theta=start_theta
-
-          act_angle = np.array([np.sin(target_theta-start_theta), np.cos(target_theta-start_theta)])
-          onehot_ac[i,action[t][0],-2:] = act_angle
-      state = self.model.predict_batch(self.sess, state, onehot_ac)
-      for i,st in enumerate(state):
-        if t==num_steps[i]-1:
-          final_state[i] = st
-#    state[:,:,0]=0.5-state[:,:,0]
-    return final_state
 
 
 if __name__=='__main__':
