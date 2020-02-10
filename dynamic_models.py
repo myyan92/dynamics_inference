@@ -1,6 +1,7 @@
 import numpy as np
 import os, shutil
 import gin
+import os
 from multiprocessing import Pool
 from physbam_python.rollout_physbam_2d import rollout_single as rollout_single_2d
 from physbam_python.rollout_physbam_3d import rollout_single as rollout_single_3d
@@ -130,7 +131,6 @@ class physbam_3d(object):
 import tensorflow as tf
 from neural_simulator.model_wrapper import Model
 
-
 @gin.configurable
 class neural_sim(object):
   def __init__(self, model_type, snapshot):
@@ -222,3 +222,4 @@ if __name__=='__main__':
     state = np.zeros((64,2))
     actions = [[( 0,np.zeros((2,)) )]]
     sc.execute_batch(state, actions)
+
