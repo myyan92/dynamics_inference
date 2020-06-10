@@ -57,7 +57,7 @@ class physbam_2d(object):
     else:
         assert(state.ndim==2)
         state = [state for a in actions]
-    pool = Pool(8)
+    pool = Pool()
     states = pool.starmap(self.execute, zip(state, actions))
     pool.close()
     pool.join()
@@ -111,7 +111,7 @@ class physbam_3d(object):
     return_traj = [return_traj for a in actions]
     reset_spring = [reset_spring for a in actions]
     idx = [i for i,a in enumerate(actions)]
-    pool = Pool(8)
+    pool = Pool()
     states = pool.starmap(self.execute, zip(state, actions, return_traj, reset_spring, idx))
     pool.close()
     pool.join()
