@@ -32,10 +32,10 @@ copyreg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 
 @gin.configurable
 class physbam_2d(object):
-  def __init__(self, physbam_args=" -disable_collisions -stiffen_bending 100"):
+  def __init__(self, physbam_args=" -stiffen_bending 100"):
     self.physbam_args = physbam_args
 
-  def execute(self, state, actions,  return_traj=False, **kwargs):
+  def execute(self, state, actions, return_traj=False, **kwargs):
     """Execute action sequence and get end state.
     Args:
       state: (N,2) array representing the current state.
@@ -43,14 +43,11 @@ class physbam_2d(object):
           the action node, and the array is 2d vector of action.
     """
     states = []
-    for ac in actions:
-      state = rollout_single_2d(state, ac[0]+1, ac[1], frames=1,
-                               physbam_args=self.physbam_args)
-      states.append(state)
-    if return_traj:
-      return states
-    else:
-      return state
+    moves = np.array([ac[1] for ac in actions])
+    nodes = np.array([[float(ac[0])/(state.shape[0]-1)] for ac in actions])
+    actions = np.concatenate([moves, nodes],axis=1)
+    states = rollout_single_2d(state, actions, physbam_args=self.physbam_args, return_traj=return_traj)
+    return states
 
   def execute_batch(self, state, actions, return_traj=False, **kwargs):
     """Execute in batch.
@@ -73,11 +70,13 @@ class physbam_2d(object):
 
 @gin.configurable
 class physbam_3d(object):
-  def __init__(self, physbam_args=" -friction 0.176 -stiffen_linear 2.223 -stiffen_bending 0.218"):
+  def __init__(self, physbam_args=" -friction 0.176 -stiffen_linear 2.223 -stiffen_bending 0.218", reset_folder=True):
+    # if multiple instances are to be used in pool, use reset_folder=False.
     self.physbam_args = physbam_args
-    if os.path.isdir('./physbam_3d_springs_tmp'):
+    if os.path.isdir('./physbam_3d_springs_tmp') and reset_folder:
         shutil.rmtree('./physbam_3d_springs_tmp')
-    os.mkdir('./physbam_3d_springs_tmp')
+    if not os.path.isdir('./physbam_3d_springs_tmp'):
+        os.mkdir('./physbam_3d_springs_tmp')
 
   def execute(self, state, actions, return_traj=False, reset_spring=True, idx=0):
     """Execute action sequence and get end state.
@@ -90,11 +89,11 @@ class physbam_3d(object):
     moves = np.array([ac[1] for ac in actions])
     nodes = np.array([[float(ac[0])/(state.shape[0]//2-1)] for ac in actions])
     actions = np.concatenate([moves, nodes],axis=1)
-    assert(state.shape==(128,3)) # must be raw state
+    assert(state.shape==(130,3)) # must be raw state
     if not reset_spring:
         if (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)))) or \
            (not os.path.exists(os.path.join('./physbam_3d_springs_tmp', 'bending_%02d.txt'%(idx)))):
-           raise ValueError('no spring files saved')
+           raise ValueError('no spring files saved %d'%(idx))
     state = rollout_single_3d(state, actions, physbam_args=' -dt 1e-3 ' + self.physbam_args,
                               return_traj=return_traj, input_raw=True, return_raw=True,
                               save_linear_spring=os.path.join('./physbam_3d_springs_tmp', 'linear_%02d.txt'%(idx)) if reset_spring else None,
@@ -129,18 +128,17 @@ class physbam_3d(object):
 
 
 import tensorflow as tf
-from neural_simulator.model_wrapper import Model
 
 @gin.configurable
 class neural_sim(object):
-  def __init__(self, model_type, snapshot):
+  def __init__(self, model, snapshot):
     self.start = tf.placeholder(tf.float32, shape=[None, 64, 3])
     self.action = tf.placeholder(tf.float32, shape=[None, 64, 3])
 
     tf_config = tf.ConfigProto()
     tf_config.gpu_options.allow_growth=True
     self.sess = tf.Session(config=tf_config)
-    self.model = Model(model_type)
+    self.model = model
     self.model.build(input=self.start, action=self.action)
     self.sess.run(tf.global_variables_initializer())
     self.model.load(self.sess, snapshot)

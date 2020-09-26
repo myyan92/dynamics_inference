@@ -160,6 +160,8 @@ if __name__ == "__main__":
         batch_gt_states = [batch_gt_states[i] for i in idx]
         batch_actions = [batch_actions[i] for i in idx]
         batch_input_states = [batch_input_states[i] for i in idx]
+    else:
+        state = batch_input_states
 
     batch_gen_states = [batch_input_states]
     for i in range(len(batch_actions[0])):
@@ -176,33 +178,33 @@ if __name__ == "__main__":
     print("prediction time: ", time.time()-start_time)
     start_time = time.time()
 
-    avg_dists, max_dists = [], []
-    for gen_states, states in zip(batch_gen_states, batch_gt_states):
-        avg_d, max_d = [], []
-        for pred, gt in zip(gen_states, states):
-            dists = np.linalg.norm(pred-gt, axis=-1)
-            avg_d.append(np.mean(dists))
-            max_d.append(np.amax(dists))
-        avg_dists.append(avg_d)
-        max_dists.append(max_d)
+    batch_gt_states=np.array(batch_gt_states)
+    dists = np.linalg.norm(batch_gen_states-batch_gt_states, axis=-1)
+    avg_dists = np.mean(dists, axis=-1)
+    max_dists = np.amax(dists, axis=-1)
     print("eval time: ", time.time()-start_time)
 
+    avg_dists_mean = np.mean(avg_dists, axis=0)
+    avg_dists_std = np.std(avg_dists, axis=0)
+    max_dists_mean = np.mean(max_dists, axis=0)
+    max_dists_std = np.std(max_dists, axis=0)
+
     plt.figure() # without offseting the start dists.
-    plt.plot(np.mean(avg_dists, axis=0), c='C0')
+    plt.plot(avg_dists_mean, c='C0')
     plt.fill_between(np.arange(batch_gen_states.shape[1]),
-                     np.mean(avg_dists, axis=0)-np.std(avg_dists, axis=0),
-                     np.mean(avg_dists, axis=0)+np.std(avg_dists, axis=0),
+                     avg_dists_mean-avg_dists_std,
+                     avg_dists_mean+avg_dists_std,
                      alpha = 0.3, facecolor='C0')
-    plt.plot(np.mean(max_dists, axis=0), c='C1')
+    plt.plot(max_dists_mean, c='C1')
     plt.fill_between(np.arange(batch_gen_states.shape[1]),
-                     np.mean(max_dists, axis=0)-np.std(max_dists, axis=0),
-                     np.mean(max_dists, axis=0)+np.std(max_dists, axis=0),
+                     max_dists_mean-max_dists_std,
+                     max_dists_mean+max_dists_std,
                      alpha = 0.3, facecolor='C1')
     plt.axis([0,batch_gen_states.shape[1],0,0.5])
     plt.savefig(args.output+'.png') #('eval_sim_trainset_withvision.png')
     np.savez(args.output+'.npz', #('eval_sim_trainset_withvision.npz',
-             mean_avg=np.mean(avg_dists, axis=0),
-             std_avg=np.std(avg_dists, axis=0),
-             mean_max=np.mean(max_dists, axis=0),
-             std_max=np.std(max_dists, axis=0))
+             mean_avg=avg_dists_mean,
+             std_avg=avg_dists_std,
+             mean_max=max_dists_mean,
+             std_max=max_dists_std)
 
